@@ -1,0 +1,21 @@
+{
+  "name": "Move Crew",
+  "genre": "sim",
+  "dim": "2D",
+  "mode": "Co-op",
+  "players": "2–4",
+  "hook": "Empty the house into the truck before time's up.",
+  "how": "Carry boxes alone and toss them into the truck, but couches, fridges and dressers need two movers, one on each end, steering through the doors together. Fragile things crack when you bump them. Pack it all in before the 2 minutes run out.",
+  "controls": "WASD to walk, Space to pick up and put down, F to throw; on a phone: drag to walk, GRAB and THROW buttons",
+  "uses": [
+    ["Host-run rules", "The host's browser keeps every item, who holds it, the truck's cargo grid, the clock and the score; if it leaves, the next player takes over."],
+    ["Leaderboard", "The crew's score at the end of a move."],
+    ["Bots", "Bot movers fetch boxes and grab the other end of your couch until enough people join."],
+    ["Live sync", "Everyone sees the same house, every lift, throw and crack."]
+  ],
+  "ideas": [
+    "Add a dog that gets in the way and has to be carried out too",
+    "Make the house two floors with a staircase in the middle",
+    "Add a piano that needs three movers"
+  ]
+}
