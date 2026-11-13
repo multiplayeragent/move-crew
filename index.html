@@ -26,6 +26,7 @@
   .card .stars { font-size: 34px; letter-spacing: 6px; color: #ffd23f; } .card .stars i { color: #ffffff30; font-style: normal; }
   .card p { margin: 4px 0; font-size: 14px; opacity: .88; }
   .card ol { text-align: left; margin: 0 0 12px; padding-left: 26px; font-size: 14px; min-height: 40px; } .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li.msg { list-style: none; margin-left: -26px; text-align: center; } /* a status line, not a numbered entry */
   button.go { width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #ff8c42; color: #2a1400; font: 800 17px system-ui, sans-serif; cursor: pointer; }
   .pad { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; gap: 14px; align-items: flex-end; }
   .pad button { width: 84px; height: 84px; border-radius: 50%; border: 2px solid #ffffff99; background: #2a223855; color: #fff; font: 800 14px system-ui, sans-serif; touch-action: none; }
@@ -45,7 +46,7 @@
 <div class="pad" id="pad" hidden><button data-k="throw">THROW</button><button data-k="grab">GRAB</button></div>
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><div class="stars" id="overStars"></div><p id="overSub"></p>
-  <h3>Best crews</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Best crews</h3><ol id="board"><li class="msg">Loading…</li></ol>
   <button class="go" id="again">Play again</button><p id="overNext"></p>
 </div></div>
 <script>
@@ -482,7 +483,7 @@ function brain(b, dt, t) {
   if (b.wait > 0) { b.wait -= dt; if (!held) return; }
   if (held && KINDS[held.k].heavy) { carryHeavy(b, held, dt, t); return; }
   b.alone = 0;
-  if (held && !needsHand(b)) { carrySmall(b, held, dt); return; }
+  if (held && !needsHand(b)) { b.hit = false; carrySmall(b, held, dt); if (KINDS[held.k].fragile) botBump(b, held, dt); return; }
   if (held) applyIntent("drop", { i: held.i, x: b.x, y: b.y }, b.id); // a person is stuck holding one end: put the box down and go help
   if (!b.task || !taskOk(b, b.task) || t - b.task.at > 15000) b.task = pickTask(b, t);
   if (!b.task) { walkTo(b, 20.5, 12, dt, 1); return; } // nothing to do: wait by the truck
@@ -518,12 +519,22 @@ function carryHeavy(b, it, dt, t) {
 function carrySmall(b, it, dt) {
   const L = bestSpot(it.k, it.i, b);
   if (!L) { if (walkTo(b, 20.6, 12, dt, CONFIG.carrySmall)) applyIntent("drop", { i: it.i, x: b.x, y: b.y }, b.id); return; }
-  const c = spotPose(it.k, L), d = Math.hypot(c.x - b.x, c.y - b.y);
-  if (KINDS[it.k].throwable && b.x < BED.x - 0.5 && d > 3.4 && d < CONFIG.throwDist + 0.5 && Math.abs(c.y - b.y) < 2 && !solid(b.x + 1, b.y)) {
-    b.f = Math.atan2(c.y - b.y, c.x - b.x); botSay(b, "throw");
+  const c = spotPose(it.k, L);
+  // Out of the house with a box or a plant and a free spot near where a throw lands: throw it in, a little off like a person.
+  const T = KINDS[it.k].throwable && b.x > 17.5 && b.x < BED.x - 0.5 ? findSpot(host.items, it.k, b.x + CONFIG.throwDist, b.y, 0, it.i, 1.4) : null;
+  const tc = T && spotPose(it.k, T), d = T ? Math.hypot(tc.x - b.x, tc.y - b.y) : 0;
+  if (T && d > 3 && d < CONFIG.throwDist + 0.5 && Math.abs(tc.y - b.y) < 2 && !solid(b.x + 1, b.y)) {
+    b.f = Math.atan2(tc.y - b.y, tc.x - b.x) + (Math.random() - 0.5) * 0.12; botSay(b, "throw");
     applyIntent("throw", { i: it.i, x: b.x, y: b.y, a: b.f }, b.id); b.wait = 0.4; return;
   }
   if (walkTo(b, c.x, c.y, dt, CONFIG.carrySmall, 0.3)) { applyIntent("drop", { i: it.i, x: c.x, y: c.y }, b.id); b.wait = 0.3; }
+}
+/** Fragile things crack for bots the same way they do for you: walking into a wall, or into another mover. */
+function botBump(b, it, dt) {
+  const now = performance.now(), others = [me, ...livePlayers().filter((id) => id !== net.sessionId).map(drawPos), ...host.bots.values()];
+  const crowd = others.some((o) => o && o !== b && near(o, b, 0.55));
+  if (((b.hit && b.freeRun > 0.25) || (crowd && b.moving)) && now - (b.bumpAt || 0) > 1000) { b.bumpAt = now; applyIntent("bump", { i: it.i }, b.id); }
+  b.freeRun = b.moving && !b.hit ? (b.freeRun || 0) + dt : 0;
 }
 /** Spots other bots are heading for, so two bots don't aim at the same cells. */
 const reserved = (b) => [...host.bots.values(), me].filter((o) => o !== b && o.task && o.task.L).map((o) => [host.items.find((x) => x.i === o.task.i)?.k || "b", o.task.L]);
@@ -567,7 +578,7 @@ function walkTo(b, tx, ty, dt, share, close = 0.2) {
   const wp = same || d < 0.9 ? { x: tx, y: ty } : nextStep(b.x, b.y, tx, ty);
   const dx = wp.x - b.x, dy = wp.y - b.y, dd = Math.hypot(dx, dy) || 1;
   const step = Math.min(dd, CONFIG.speed * (b === me ? 0.9 : CONFIG.botPace) * share * (onStairs(b.x, b.y) ? CONFIG.stairs : 1) * dt);
-  moveBody(b, (dx / dd) * step, (dy / dd) * step);
+  b.hit = moveBody(b, (dx / dd) * step, (dy / dd) * step);
   b.f = Math.atan2(dy, dx); b.moving = true;
   const t = performance.now(); // stuck against a corner for 2s: give up this job and think again
   if (Math.hypot(b.x - b.prog.x, b.y - b.prog.y) > 0.3) b.prog = { x: b.x, y: b.y, at: t }; else if (!b.prog.at) b.prog.at = t;
@@ -631,7 +642,7 @@ function myTick(dt, g) {
   if (me.roundId !== g.id) { me.roundId = g.id; Object.assign(me, ATTRACT ? spawnAt(0) : freeSpawn()); confirmToss.clear(); }
   if (ATTRACT && isHost()) { me.id = net.sessionId; if (g.phase === "play") brain(me, dt, Date.now()); publishMe(); return; }
   const held = heldBy(net.sessionId), K = held && KINDS[held.k];
-  let [ix, iy] = screenToWorldDir(input.x, input.y); const len = Math.hypot(ix, iy);
+  let [ix, iy] = g.phase === "over" ? [0, 0] : screenToWorldDir(input.x, input.y); const len = Math.hypot(ix, iy); // the results card is up: keys don't walk you under it
   if (len > 1) { ix /= len; iy /= len; }
   const share = (held ? (K.heavy ? CONFIG.carryHeavy : CONFIG.carrySmall) : 1) * (onStairs(me.x, me.y) ? CONFIG.stairs : 1);
   const dx = ix * CONFIG.speed * share * dt, dy = iy * CONFIG.speed * share * dt;
@@ -903,11 +914,11 @@ function hud(g) {
 }
 function showBoard(score) {
   const list = $("board");
-  if (!boardApi) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!boardApi) { list.innerHTML = "<li class=\"msg\">Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class=\"msg\">Loading…</li>";
   (score > 0 ? boardApi.submit(score).catch(() => null) : Promise.resolve()).then(() => boardApi.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No scores yet. Set the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li class=\"msg\">No scores yet. Set the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class=\"msg\">Couldn't load the leaderboard.</li>"; });
 }
 $("again").onclick = () => act("again", {});
 let audio = null;
@@ -946,6 +957,7 @@ for (const b of document.querySelectorAll(".pad button")) {
   for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, () => b.classList.remove("on"));
 }
 document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+cv.addEventListener("contextmenu", (e) => e.preventDefault()); // no browser menu on a right-click or a long press
 
 // ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
 /** The room can look empty the instant I join: if someone (or a bot) already has my color, take a free one. */
